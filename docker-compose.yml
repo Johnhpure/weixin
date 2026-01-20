@@ -1,0 +1,68 @@
+version: '3.8'
+
+services:
+  # Database: PostgreSQL with pgvector extension
+  db:
+    image: pgvector/pgvector:pg16
+    container_name: wecreate_db
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-app}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-app_password}
+      POSTGRES_DB: ${POSTGRES_DB:-wecreate_ai}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  # Cache & Task Queue: Redis
+  redis:
+    image: redis:7-alpine
+    container_name: wecreate_redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+
+  # Backend: FastAPI + Celery Worker
+  # Note: In dev mode, we might run this locally, but good to have in docker
+  backend:
+    build: 
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: wecreate_backend
+    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+    volumes:
+      - ./backend:/app
+      - ./data:/data  # For local image storage
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql://app:app_password@db:5432/wecreate_ai
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+    depends_on:
+      - db
+      - redis
+
+  # Frontend: Next.js
+  # backend-api is for server-side calls, localhost for client-side
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: wecreate_frontend
+    command: npm run dev
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:8000
+    depends_on:
+      - backend
+
+volumes:
+  postgres_data:
+  redis_data:
